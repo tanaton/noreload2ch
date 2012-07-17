@@ -1,0 +1,12 @@
+{
+	"WSHost"	: "localhost",
+	"WSPort"	: 12345,
+	"List"		: [
+		{
+			"Board"	: "livenhk"
+		},
+		{
+			"Board"	: "livetbs"
+		}
+	]
+}
