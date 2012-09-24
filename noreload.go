@@ -154,15 +154,22 @@ func (wsc *WsConnection) timeCallback() {
 	defer wsc.dispose(sync)
 	// 一定期間で発火するインターバルタイマの生成
 	tick := time.Tick(IGNITION_TIME)
-	nch, fire := getBoardCh(wsc.board, wsc.dh.slch)
+	btick := time.Tick(BOARD_CYCLE_TIME)
+	nich := wsc.getBoard()
 
 	for _ = range tick {
+		// 接続がない時は終了する
 		if wsc.isConnection() == false {
-			// 接続がない時は終了する
+			wsc.dh.logger.Printf("exit %s", wsc.board)
 			break
 		}
-		n := <-nch
-		data, resno, err := getData(n)
+		select {
+		case <-btick:
+			// 時間経過による再取得
+			nich = wsc.getBoard()
+		default:
+		}
+		data, resno, err := getData(nich)
 		if err != nil {
 			wsc.dh.logger.Printf("Error:%s", err.Error())
 			continue
@@ -170,9 +177,9 @@ func (wsc *WsConnection) timeCallback() {
 			// 更新無し
 			continue
 		} else if resno >= 1000 {
-			fire <- true
-			<-nch
+			nich = wsc.getBoard()
 		}
+
 		dl := time.Now().Add(WS_DEADLINE_TIME)
 		wsc.mux.RLock()
 		for socket, ech := range wsc.listen {
@@ -182,6 +189,14 @@ func (wsc *WsConnection) timeCallback() {
 		}
 		wsc.mux.RUnlock()
 	}
+}
+
+func (wsc *WsConnection) getBoard() (nich Nich) {
+	sl := <-wsc.dh.slch
+	if s, ok := (*sl)[wsc.board]; ok {
+		nich = getBoard(s, wsc.board)
+	}
+	return
 }
 
 func (wsc *WsConnection) isConnection() bool {
@@ -278,33 +293,6 @@ func getServer() map[string]string {
 		}
 	}
 	return sl
-}
-
-func getBoardCh(board string, slch <-chan *map[string]string) (<-chan Nich, chan<- bool) {
-	ch := make(chan Nich)
-	fire := make(chan bool, 1)
-	go func() {
-		var nich Nich
-		f := func() {
-			sl := <-slch
-			if s, ok := (*sl)[board]; ok {
-				nich = getBoard(s, board)
-			}
-		}
-		tch := time.Tick(BOARD_CYCLE_TIME)
-		f()
-		for {
-			select {
-			case <-tch:
-				f()
-			case <-fire:
-				f()
-			default:
-				ch <- nich
-			}
-		}
-	}()
-	return ch, fire
 }
 
 func getBoard(s, board string) (n Nich) {
