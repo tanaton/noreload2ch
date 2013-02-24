@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,10 @@ type Board struct {
 	n				Nich
 	res				int
 	speed			float64
+}
+type Boards []*Board
+type BoardsBySpeed struct {
+	Boards
 }
 
 type DispatchHandler struct {
@@ -307,7 +312,7 @@ func getBoard(s, board string) (n Nich) {
 		log.Printf(err.Error() + "\n")
 		return
 	}
-	bl := make([]Board, 0, 1)
+	bl := make(Boards, 0, 1)
 	list := strings.Split(string(data), "\n")
 	for _, it := range list {
 		if d := g_reg_dat.FindStringSubmatch(it); len(d) == 3 {
@@ -321,18 +326,16 @@ func getBoard(s, board string) (n Nich) {
 				tmp := (now - float64(num)) / float64(res)
 				if tmp > 0.0 {
 					// ゼロ除算防止
-					bl = append(bl, Board{
+					bl = append(bl, &Board{
 						n		: n,
 						res		: res,
-						speed	: (86400.0 / tmp),
+						speed	: 86400.0 / tmp,
 					})
 				}
 			}
 		}
 	}
-	bl = Qsort(bl, func(a, b Board) float64 {
-		return b.speed - a.speed
-	})
+	sort.Sort(BoardsBySpeed{bl})
 	for _, bline := range bl {
 		if bline.res >= 5 && bline.res <= 1000 {
 			n = bline.n
@@ -340,40 +343,6 @@ func getBoard(s, board string) (n Nich) {
 		}
 	}
 	return n
-}
-
-func Qsort(list []Board, cmp func(a, b Board) float64) []Board {
-	ret := make([]Board, len(list))
-	copy(ret, list)
-	stack := make([]int, 0, 2)
-	stack = append(stack, 0)
-	stack = append(stack, len(list) - 1)
-	for len(stack) != 0 {
-		tail := stack[len(stack) - 1]
-		stack = stack[0:len(stack) - 1]
-		head := stack[len(stack) - 1]
-		stack = stack[0:len(stack) - 1]
-		pivot := ret[head + ((tail - head) >> 1)]
-		i := head - 1
-		j := tail + 1
-		for {
-			for i++; cmp(ret[i], pivot) < 0.0; i++ {}
-			for j--; cmp(ret[j], pivot) > 0.0; j-- {}
-			if i >= j { break }
-			tmp := ret[i]
-			ret[i] = ret[j]
-			ret[j] = tmp
-		}
-		if head < (i - 1) {
-			stack = append(stack, head)
-			stack = append(stack, i - 1)
-		}
-		if (j + 1) < tail {
-			stack = append(stack, j + 1)
-			stack = append(stack, tail)
-		}
-	}
-	return ret
 }
 
 func sjisToUtf8(data []byte) ([]byte, error) {
@@ -427,5 +396,12 @@ func (c *Config) getDataString(h, def string) (ret string) {
 		}
 	}
 	return
+}
+
+func (b Boards) Len() int { return len(b) }
+func (b Boards) Swap(i, j int) { b[i], b[j] = b[j], b[i] }
+func (bs BoardsBySpeed) Less(i, j int) bool {
+	// 降順
+	return bs.Boards[i].speed > bs.Boards[j].speed
 }
 
