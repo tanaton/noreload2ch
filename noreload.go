@@ -3,9 +3,13 @@ package main
 
 import (
 	"bytes"
+	"code.google.com/p/go-charset/charset"
+	_ "code.google.com/p/go-charset/data"
+	"code.google.com/p/go.net/websocket"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tanaton/get2ch-go"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -16,33 +20,29 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"code.google.com/p/go.net/websocket"
-	"github.com/tanaton/get2ch-go"
-	"code.google.com/p/go-charset/charset"
-	_ "code.google.com/p/go-charset/data"
 )
 
 const (
-	DAT_DIR				= "/2ch/dat"
-	CONFIG_JSON_PATH	= "noreload.json"
-	MAX_PROCS			= 64
+	DAT_DIR          = "/2ch/dat"
+	CONFIG_JSON_PATH = "noreload.json"
+	MAX_PROCS        = 64
 	// 2秒毎
-	IGNITION_TIME		= 2 * time.Second
-	BOARD_CYCLE_TIME	= 30 * time.Second
-	SERVER_CYCLE_TIME	= 120 * time.Minute
-	WS_DEADLINE_TIME	= 10 * time.Second
+	IGNITION_TIME     = 2 * time.Second
+	BOARD_CYCLE_TIME  = 30 * time.Second
+	SERVER_CYCLE_TIME = 120 * time.Minute
+	WS_DEADLINE_TIME  = 10 * time.Second
 )
 
 type Nich struct {
-	server			string
-	board			string
-	thread			string
+	server string
+	board  string
+	thread string
 }
 
 type Board struct {
-	n				Nich
-	res				int
-	speed			float64
+	n     Nich
+	res   int
+	speed float64
 }
 type Boards []*Board
 type BoardsBySpeed struct {
@@ -50,26 +50,26 @@ type BoardsBySpeed struct {
 }
 
 type DispatchHandler struct {
-	mwh				map[string]websocket.Handler
-	mwhu			sync.RWMutex
-	logger			*log.Logger
-	slch			<-chan *map[string]string
+	mwh    map[string]websocket.Handler
+	mwhu   sync.RWMutex
+	logger *log.Logger
+	slch   <-chan map[string]string
 }
 
 type WsConnection struct {
-	listen			map[*websocket.Conn]chan error
-	mux				sync.RWMutex
-	board			string
-	dh				*DispatchHandler
+	listen map[*websocket.Conn]chan error
+	mux    sync.RWMutex
+	board  string
+	dh     *DispatchHandler
 }
 
 type Config struct {
-	v				map[string]interface{}
-	wh				string
-	wp				int
-	ReadTimeoutSec	int
-	WriteTimeoutSec	int
-	MaxHeaderBytes	int
+	v               map[string]interface{}
+	wh              string
+	wp              int
+	ReadTimeoutSec  int
+	WriteTimeoutSec int
+	MaxHeaderBytes  int
 }
 
 var g_reg_bbs *regexp.Regexp = regexp.MustCompile("(.+\\.2ch\\.net|.+\\.bbspink\\.com)/(.+)<>")
@@ -79,18 +79,18 @@ var g_reg_title *regexp.Regexp = regexp.MustCompile("^.*?<>.*?<>.*?<>.*?<>(.*?)\
 func main() {
 	c := readConfig()
 	slch := getServerCh()
-	logger := log.New(os.Stdout, "", log.Ldate | log.Ltime | log.Lmicroseconds)
+	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lmicroseconds)
 	myHandler := &DispatchHandler{
-		mwh		: make(map[string]websocket.Handler),
-		logger	: logger,
-		slch	: slch,
+		mwh:    make(map[string]websocket.Handler),
+		logger: logger,
+		slch:   slch,
 	}
 	server := &http.Server{
-		Addr			: fmt.Sprintf("%s:%d", c.wh, c.wp),
-		Handler			: myHandler,
-		ReadTimeout		: time.Duration(c.ReadTimeoutSec) * time.Second,
-		WriteTimeout	: time.Duration(c.WriteTimeoutSec) * time.Second,
-		MaxHeaderBytes	: c.MaxHeaderBytes,
+		Addr:           fmt.Sprintf("%s:%d", c.wh, c.wp),
+		Handler:        myHandler,
+		ReadTimeout:    time.Duration(c.ReadTimeoutSec) * time.Second,
+		WriteTimeout:   time.Duration(c.WriteTimeoutSec) * time.Second,
+		MaxHeaderBytes: c.MaxHeaderBytes,
 	}
 	// サーバ起動
 	logger.Fatal(server.ListenAndServe())
@@ -107,9 +107,13 @@ func (dh *DispatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (dh *DispatchHandler) checkPath(path string) (string, error) {
 	l := strings.Split(path, "/")
-	if len(l) != 2 { return "", errors.New("path error") }
+	if len(l) != 2 {
+		return "", errors.New("path error")
+	}
 	sl := <-dh.slch
-	if _, ok := (*sl)[l[1]]; !ok { return "", errors.New("path error") }
+	if _, ok := sl[l[1]]; !ok {
+		return "", errors.New("path error")
+	}
 	return l[1], nil
 }
 
@@ -126,9 +130,9 @@ func (dh *DispatchHandler) match(b string) websocket.Handler {
 
 func createWebHandler(board string, dh *DispatchHandler) func(ws *websocket.Conn) {
 	wsc := &WsConnection{
-		listen	: make(map[*websocket.Conn]chan error),
-		board	: board,
-		dh		: dh,
+		listen: make(map[*websocket.Conn]chan error),
+		board:  board,
+		dh:     dh,
 	}
 	go wsc.timeCallback()
 
@@ -198,7 +202,7 @@ func (wsc *WsConnection) timeCallback() {
 
 func (wsc *WsConnection) getBoard() (nich Nich) {
 	sl := <-wsc.dh.slch
-	if s, ok := (*sl)[wsc.board]; ok {
+	if s, ok := sl[wsc.board]; ok {
 		nich = getBoard(s, wsc.board)
 	}
 	return
@@ -218,7 +222,7 @@ func (wsc *WsConnection) dispose(sync chan bool) {
 }
 
 func writeData(data []byte, con *websocket.Conn, ech chan error, sync <-chan bool) {
-	_, werr := con.Write(data)
+	werr := websocket.Message.Send(con, string(data))
 	if werr != nil {
 		ech <- werr
 	}
@@ -231,11 +235,17 @@ func getData(n Nich) ([]byte, int, error) {
 	get := get2ch.NewGet2ch(get2ch.NewFileCache(DAT_DIR))
 	//if wss.sh != "" { get.SetSalami(wss.sh, wss.sp) }
 	moto, err := get.Cache.GetData(n.server, n.board, n.thread)
-	if err != nil { moto = nil }
+	if err != nil {
+		moto = nil
+	}
 	err = get.SetRequest(n.server, n.board, n.thread)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	data, err := get.GetData()
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 
 	if moto == nil {
 		str, resno = sendData(data, 0)
@@ -252,22 +262,24 @@ func getData(n Nich) ([]byte, int, error) {
 	if t := g_reg_title.FindSubmatch(data); len(t) == 2 {
 		title = string(t[1])
 	}
-	sdata, err := sjisToUtf8([]byte(n.board + "/" + n.thread + " " + title + "\n" + str))
-	if err != nil { return nil, 0, err }
+	sdata, err := sjisToUtf8([]byte(n.board + "/" + n.thread + "\t" + title + "\n" + str))
+	if err != nil {
+		return nil, 0, err
+	}
 	return sdata, resno, nil
 }
 
 func sendData(data []byte, resno int) (string, int) {
 	line := strings.Split(string(data), "\n")
-	for i, _ := range line[0:len(line) - 1] {
+	for i, _ := range line[0 : len(line)-1] {
 		resno++
 		line[i] = fmt.Sprintf("%d<>%s", resno, line[i])
 	}
 	return strings.Join(line, "\n"), resno
 }
 
-func getServerCh() <-chan *map[string]string {
-	ch := make(chan *map[string]string, 4)
+func getServerCh() <-chan map[string]string {
+	ch := make(chan map[string]string, 4)
 	go func() {
 		tch := time.Tick(SERVER_CYCLE_TIME)
 		sl := getServer()
@@ -276,7 +288,7 @@ func getServerCh() <-chan *map[string]string {
 			case <-tch:
 				sl = getServer()
 			default:
-				ch <- &sl
+				ch <- sl
 			}
 		}
 	}()
@@ -289,7 +301,9 @@ func getServer() map[string]string {
 	data, err := get.GetServer()
 	if err != nil {
 		data, err = get.Cache.GetData("", "", "")
-		if err != nil { panic(err.Error()) }
+		if err != nil {
+			panic(err.Error())
+		}
 	}
 	list := strings.Split(string(data), "\n")
 	for _, it := range list {
@@ -303,10 +317,12 @@ func getServer() map[string]string {
 func getBoard(s, board string) (n Nich) {
 	now := float64(time.Now().Unix())
 	get := get2ch.NewGet2ch(get2ch.NewFileCache(DAT_DIR))
-//	if wss.sh != "" { get.SetSalami(wss.sh, wss.sp) }
-//	err := get.SetRequest(s, wss.board, "")
+	//	if wss.sh != "" { get.SetSalami(wss.sh, wss.sp) }
+	//	err := get.SetRequest(s, wss.board, "")
 	err := get.SetRequest(s, board, "")
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	data, err := get.GetData()
 	if err != nil {
 		log.Printf(err.Error() + "\n")
@@ -327,9 +343,9 @@ func getBoard(s, board string) (n Nich) {
 				if tmp > 0.0 {
 					// ゼロ除算防止
 					bl = append(bl, &Board{
-						n		: n,
-						res		: res,
-						speed	: 86400.0 / tmp,
+						n:     n,
+						res:   res,
+						speed: 86400.0 / tmp,
 					})
 				}
 			}
@@ -347,7 +363,9 @@ func getBoard(s, board string) (n Nich) {
 
 func sjisToUtf8(data []byte) ([]byte, error) {
 	r, err := charset.NewReader("cp932", bytes.NewReader(data))
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	result, err := ioutil.ReadAll(r)
 	return result, err
 }
@@ -367,15 +385,19 @@ func readConfig() *Config {
 
 func (c *Config) read(filename string) {
 	data, err := ioutil.ReadFile(filename)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	err = json.Unmarshal(data, &c.v)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	c.wh = c.getDataString("WSHost", "localhost")
 	c.wp = c.getDataInt("WSPort", 8000)
 	c.ReadTimeoutSec = c.getDataInt("ReadTimeoutSec", 10)
 	c.WriteTimeoutSec = c.getDataInt("WriteTimeoutSec", 10)
-	c.MaxHeaderBytes = c.getDataInt("MaxHeaderBytes", 1024 * 10)
+	c.MaxHeaderBytes = c.getDataInt("MaxHeaderBytes", 1024*10)
 }
 
 func (c *Config) getDataInt(h string, def int) (ret int) {
@@ -398,10 +420,9 @@ func (c *Config) getDataString(h, def string) (ret string) {
 	return
 }
 
-func (b Boards) Len() int { return len(b) }
+func (b Boards) Len() int      { return len(b) }
 func (b Boards) Swap(i, j int) { b[i], b[j] = b[j], b[i] }
 func (bs BoardsBySpeed) Less(i, j int) bool {
 	// 降順
 	return bs.Boards[i].speed > bs.Boards[j].speed
 }
-
